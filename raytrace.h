@@ -3,11 +3,12 @@
 ////////////////////////////////////////////////////////////////////////
 
 #include <vector>
+#include "shape.h"
 
 class Shape;
 class Material;
 class Camera;
-class Intersection;
+struct Intersection;
 
 const float PI = 3.14159f;
 
@@ -70,7 +71,7 @@ public:
     // it will call:
     void triangleMesh(MeshData* mesh);
 
-	Intersection *traceRay();
+	Intersection *traceRay(Ray ray);
 
     // The main program will call the TraceImage method to generate
     // and return the image.  This is the Ray Tracer!

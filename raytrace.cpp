@@ -3,6 +3,7 @@
 ////////////////////////////////////////////////////////////////////////
 
 #include <vector>
+#include <climits>
 
 #ifdef _WIN32
     // Includes for Windows
@@ -19,7 +20,6 @@
 //#include "realtime.h"
 #include "material.h"
 #include "camera.h"
-#include "shape.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -33,6 +33,7 @@ std::uniform_real_distribution<> myrandom(0.0, 1.0);
 Scene::Scene() 
 { 
     //realtime = new Realtime(); 
+	camera = new Camera();
 }
 
 void Scene::Finit()
@@ -44,9 +45,18 @@ void Scene::triangleMesh(MeshData* mesh)
     //realtime->triangleMesh(mesh); 
 }
 
-Intersection * Scene::traceRay()
+Intersection * Scene::traceRay(Ray ray)
 {
-	return nullptr;
+	Intersection result = Intersection();
+	result.t = FLT_MAX;
+	Intersection it = Intersection();
+	for (auto s : shapes) {
+		if (s->intersect(ray, it)) {
+			if (result.t > it.t) result = it;
+		}
+	}
+	if (result.t == FLT_MAX) return nullptr;
+	else return new Intersection(result);
 }
 
 const float Radians = PI / 180.0f;    // Convert degrees to radians
@@ -172,22 +182,50 @@ void Scene::Command(const std::vector<std::string>& strings,
 
 void Scene::TraceImage(Color* image, const int pass)
 {
-    //realtime->run();                          // Remove this (realtime stuff)
+    // realtime->run();                          // Remove this (realtime stuff)
+
+	// Build unit vector for camera space.
+	float rx = camera->ry * width / height;
+	Vector3f camX = rx * camera->orient._transformVector(Vector3f::UnitX());
+	Vector3f camY = camera->ry * camera->orient._transformVector(Vector3f::UnitY());
+	Vector3f camZ = -1 * camera->orient._transformVector(Vector3f::UnitZ());
 
 #pragma omp parallel for schedule(dynamic, 1) // Magic: Multi-thread y loop
-    for (int y=0;  y<height;  y++) {
+    for (int y=0;  y<height - 1;  ++y) {
+		for (int x = 0; x < width - 1; ++x) {
+        fprintf(stderr, "Rendering y: %4d, x: %4d\r", y, x);
+		// define the ray
+		// transform x and y to [-1,1] screen space
+		float dx = (x + 0.5f) / width * 2 - 1;
+		float dy = (y + 0.5f) / height * 2 - 1;
+		Vector3f rayDir = dx*camX + dy*camY + camZ;
+		rayDir.normalize();
+		Ray ray(camera->eye, rayDir);
 
-        fprintf(stderr, "Rendering %4d\r", y);
-        for (int x=0;  x<width;  x++) {
-            Color color;
-            if ((x-width/2)*(x-width/2)+(y-height/2)*(y-height/2) < 100*100)
-                color = Color(myrandom(RNGen), myrandom(RNGen), myrandom(RNGen));
-            else if (abs(x-width/2)<4 || abs(y-height/2)<4)
-                color = Color(0.0, 0.0, 0.0);
-            else 
-                color = Color(1.0, 1.0, 1.0);
-            image[y*width + x] = color;
-        }
-    }
+		// trace the ray
+		Intersection *intersection = traceRay(ray);
+
+		// compute the color
+		// Initialized default color to black.
+		Color color = Vector3f(0.0f, 0.0f, 0.0f);
+
+		// Compute brdf if intersection exists and is not a light source
+		if (intersection) {
+			if (!intersection->pS->mat->isLight()) {
+				Vector3f result(0.0f, 0.0f, 0.0f);
+				for (auto e : emitters)
+					// Combine the value from all non-attenuative lights.
+					result += intersection->pS->mat->Kd / PI * intersection->normal.dot(e->position);
+				color = result;
+			}
+			// Use pure color for light sources
+			else color = intersection->pS->mat->color;
+
+			delete intersection;
+		}
+
+		image[y*width + x] = color;
+		}
+	}
     fprintf(stderr, "\n");
 }

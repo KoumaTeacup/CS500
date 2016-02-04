@@ -4,11 +4,19 @@
 
 class Shape;
 
+struct Slab
+{
+	Slab() {}
+	Slab(Vector3f _normal, float _d0, float _d1):normal(_normal), d0(_d0), d1(_d1){}
+	Vector3f normal;
+	float d0, d1;
+};
+
 class Ray {
 public:
 	Ray(Vector3f q, Vector3f d) :Q(q), D(d) {}
 
-	Vector3f eval(float t) { return Q + t * D; }
+	Vector3f eval(float t)const { return Q + t * D; }
 	Vector3f Q, D;
 };
 
@@ -20,6 +28,7 @@ struct Intersection {
 
 class Shape {
 public:
+	Vector3f position;
 	Shape(Material *m):mat(m) {}
 	virtual ~Shape() {}
 
@@ -32,14 +41,15 @@ class Sphere : public Shape {
 public:
 	Vector3f center;
 	float radius;
-	Sphere(Vector3f _center, float _radius, Material *m) : Shape(m), center(_center), radius(_radius) {}
+	Sphere(Vector3f _center, float _radius, Material *m) : Shape(m), center(_center), radius(_radius) { position = _center; }
 	bool intersect(const Ray& ray, Intersection& it);
 };
 
 class Box : public Shape {
 public:
+	Slab slabs[3];
 	Vector3f corner, diag;
-	Box(Vector3f c, Vector3f d, Material *m) : Shape(m), corner(c), diag(d) {}
+	Box(Vector3f c, Vector3f d, Material *m);
 	bool intersect(const Ray& ray, Intersection& it);
 };
 
@@ -47,7 +57,7 @@ class Cylinder : public Shape {
 public:
 	Vector3f base, axis;
 	float radius;
-	Cylinder(Vector3f b, Vector3f a, float r, Material *m) : Shape(m), base(b), axis(a), radius(r) {}
+	Cylinder(Vector3f b, Vector3f a, float r, Material *m) : Shape(m), base(b), axis(a), radius(r) { position = base + axis / 2.0f; }
 	bool intersect(const Ray& ray, Intersection& it);
 };
 
