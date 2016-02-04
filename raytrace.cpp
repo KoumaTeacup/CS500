@@ -216,7 +216,9 @@ void Scene::TraceImage(Color* image, const int pass)
 				for (auto e : emitters)
 					// Combine the value from all non-attenuative lights.
 					result += intersection->pS->mat->Kd / PI * intersection->normal.dot(e->position);
-				color = result;
+				//color = result;
+				color = intersection->normal;
+				//color = intersection->pS->mat->Kd;
 			}
 			// Use pure color for light sources
 			else color = intersection->pS->mat->color;

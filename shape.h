@@ -55,9 +55,11 @@ public:
 
 class Cylinder : public Shape {
 public:
+	Slab slab;
 	Vector3f base, axis;
 	float radius;
-	Cylinder(Vector3f b, Vector3f a, float r, Material *m) : Shape(m), base(b), axis(a), radius(r) { position = base + axis / 2.0f; }
+	Cylinder(Vector3f b, Vector3f a, float r, Material *m) : 
+		Shape(m), base(b), axis(a), radius(r) ,slab(Vector3f(0.0f, 0.0f, 1.0f), 0.0f, -a.norm()){ position = base + axis / 2.0f; }
 	bool intersect(const Ray& ray, Intersection& it);
 };
 
