@@ -78,7 +78,6 @@ bool Box::intersect(const Ray & ray, Intersection & it)
 
 bool Cylinder::intersect(const Ray & ray, Intersection & it)
 {
-	Quaternionf q = Quaternionf::FromTwoVectors(axis, Vector3f::UnitZ());
 	Vector3f Q = q._transformVector(ray.Q - base);
 	Vector3f D = q._transformVector(ray.D);
 	float t0 = 0, t1 = FLT_MAX;
@@ -111,14 +110,14 @@ bool Cylinder::intersect(const Ray & ray, Intersection & it)
 	float c0 = (-b - deter) / 2.0f / a;
 	float c1 = (-b + deter) / 2.0f / a;
 
-	Vector3f normal0, normal1;
+	Vector3f normal0, normal1, M;
 	if (b0 > c0) {
 		t0 = b0;
 		if (D[2] > 0.0f) normal0 = Vector3f(0.0f, 0.0f, -1.0f);
 		else normal0 = Vector3f(0.0f, 0.0f, 1.0f);
 	} else {
 		t0 = c0;
-		Vector3f M = Q + t0*D;
+		M = Q + t0*D;
 		normal0 = Vector3f(M[0], M[1], 0.0f);
 	}
 
@@ -128,21 +127,22 @@ bool Cylinder::intersect(const Ray & ray, Intersection & it)
 		else normal1 = Vector3f(0.0f, 0.0f, -1.0f);
 	} else {
 		t1 = c1;
-		Vector3f M = Q + t1*D;
+		M = Q + t1*D;
 		normal1 = Vector3f(M[0], M[1], 0.0f);
 	}
 
 	if (t0 > t1) return false;
 	else if (t0 > 0.0f) {
 		it.t = t0;
-		it.normal = q.conjugate()._transformVector(normal0);
+		it.normal = q.conjugate()._transformVector(normal0) * 10.0f;
 	} else if (t1 > 0.0f) {
 		it.t = t1;
-		it.normal = q.conjugate()._transformVector(normal1);
+		it.normal = q.conjugate()._transformVector(normal1) * 10.0f;
 	} else return false;
 
 	it.pos = ray.eval(it.t);
 	it.pS = this;
+	it.normal.normalize();
 	return true;
 }
 
