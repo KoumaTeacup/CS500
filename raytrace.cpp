@@ -213,7 +213,7 @@ void Scene::TraceImage(Color* image, const int pass)
 	Vector3f camY = camera->ry * camera->orient._transformVector(Vector3f::UnitY());
 	Vector3f camZ = -1 * camera->orient._transformVector(Vector3f::UnitZ());
 
-//#pragma omp parallel for schedule(dynamic, 1) // Magic: Multi-thread y loop
+#pragma omp parallel for schedule(dynamic, 1) // Magic: Multi-thread y loop
     for (int y=0;  y<height - 1;  ++y) {
 		for (int x = 0; x < width - 1; ++x) {
         fprintf(stderr, "Rendering y: %4d, x: %4d\r", y, x);
