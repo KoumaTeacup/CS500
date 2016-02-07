@@ -2,6 +2,9 @@
 // Provides the framework for a raytracer.
 ////////////////////////////////////////////////////////////////////////
 
+#include <Eigen/StdVector>
+#include <Eigen_unsupported/Eigen/BVH>
+#include "minimizer.h"
 #include <vector>
 #include <climits>
 
@@ -43,9 +46,22 @@ void Scene::Finit()
 void Scene::triangleMesh(MeshData* mesh) 
 { 
     //realtime->triangleMesh(mesh); 
+	for (auto i : mesh->triangles) {
+		shapes.push_back(new Triangle(
+			mesh->vertices[i[0]].pnt,
+			mesh->vertices[i[1]].pnt,
+			mesh->vertices[i[2]].pnt,
+			mesh->vertices[i[0]].nrm,
+			mesh->vertices[i[1]].nrm,
+			mesh->vertices[i[2]].nrm,
+			mesh->mat));
+	}
 }
 
-Intersection * Scene::traceRay(Ray ray)
+void Scene::buildKDTree() {
+}
+
+Intersection * Scene::traceRay(Ray ray, std::vector<Shape*> shapes)
 {
 	Intersection result = Intersection();
 	result.t = FLT_MAX;
@@ -184,13 +200,20 @@ void Scene::TraceImage(Color* image, const int pass)
 {
     // realtime->run();                          // Remove this (realtime stuff)
 
+	std::vector<Shape*> bboxes;
+	for (auto i : shapes) {
+		bboxes.push_back(new Box(i->bbox().corner(Box3d::BottomLeftFloor), i->bbox().corner(Box3d::TopRightCeil) - i->bbox().corner(Box3d::BottomLeftFloor) ,currentMat));
+	}
+
+	KdBVH<float, 3, Shape*> tree(shapes.begin(), shapes.end());
+
 	// Build unit vector for camera space.
 	float rx = camera->ry * width / height;
 	Vector3f camX = rx * camera->orient._transformVector(Vector3f::UnitX());
 	Vector3f camY = camera->ry * camera->orient._transformVector(Vector3f::UnitY());
 	Vector3f camZ = -1 * camera->orient._transformVector(Vector3f::UnitZ());
 
-#pragma omp parallel for schedule(dynamic, 1) // Magic: Multi-thread y loop
+//#pragma omp parallel for schedule(dynamic, 1) // Magic: Multi-thread y loop
     for (int y=0;  y<height - 1;  ++y) {
 		for (int x = 0; x < width - 1; ++x) {
         fprintf(stderr, "Rendering y: %4d, x: %4d\r", y, x);
@@ -202,8 +225,13 @@ void Scene::TraceImage(Color* image, const int pass)
 		rayDir.normalize();
 		Ray ray(camera->eye, rayDir);
 
+		ray.x = x;
+		ray.y = y;
+
 		// trace the ray
-		Intersection *intersection = traceRay(ray);
+		Minimizer minimizer(ray);
+		Intersection *intersection = BVMinimize(tree, minimizer) == FLT_MAX ? NULL : &minimizer.minIt;
+		//Intersection *intersection = traceRay(ray, bboxes);
 
 		// compute the color
 		// Initialized default color to black.
@@ -222,8 +250,6 @@ void Scene::TraceImage(Color* image, const int pass)
 			}
 			// Use pure color for light sources
 			else color = intersection->pS->mat->color;
-
-			delete intersection;
 		}
 
 		image[y*width + x] = color;

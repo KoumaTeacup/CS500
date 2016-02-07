@@ -106,7 +106,10 @@ void recurseModelNodes(Scene* scene,
                                                   aiface->mIndices[2])); }
         meshdata->mat = material;
         
-        scene->triangleMesh(meshdata); }
+        scene->triangleMesh(meshdata);
+
+		delete meshdata;
+	}
 
     printf("\n");
 

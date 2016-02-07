@@ -1,3 +1,4 @@
+#pragma once
 ///////////////////////////////////////////////////////////////////////
 // A framework for a raytracer.
 ////////////////////////////////////////////////////////////////////////
@@ -5,10 +6,7 @@
 #include <vector>
 #include "shape.h"
 
-class Shape;
-class Material;
-class Camera;
-struct Intersection;
+struct Camera;
 
 const float PI = 3.14159f;
 
@@ -71,7 +69,9 @@ public:
     // it will call:
     void triangleMesh(MeshData* mesh);
 
-	Intersection *traceRay(Ray ray);
+	void buildKDTree();
+
+	Intersection *traceRay(Ray ray, std::vector<Shape*> shapes);
 
     // The main program will call the TraceImage method to generate
     // and return the image.  This is the Ray Tracer!

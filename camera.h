@@ -2,7 +2,7 @@
 
 #include "geom.h"
 
-class Camera {
+struct Camera {
 public:
 	Vector3f eye;
 	Quaternionf orient;

@@ -2,6 +2,9 @@
 
 bool Sphere::intersect(const Ray & ray, Intersection & it)
 {
+	if (ray.x == 293 && ray.y == 72) {
+		printf("Sphere %d is under checked\n", thisId);
+	}
 	Vector3f Qbar = ray.Q - center;
 	float QdotD = Qbar.dot(ray.D);
 	float fvar = sqrt(QdotD*QdotD - Qbar.dot(Qbar) + radius*radius);
@@ -13,8 +16,13 @@ bool Sphere::intersect(const Ray & ray, Intersection & it)
 	it.normal = (it.pos - center).normalized();
 	it.pS = this;
 
+	if (ray.x == 293 && ray.y == 72) {
+		printf("Sphere %d has intersection with t = %.2f\n", thisId, it.t);
+	}
 	return true;
 }
+
+int Sphere::id = 0;
 
 Box::Box(Vector3f c, Vector3f d, Material * m) : Shape(m), corner(c), diag(d){
 	slabs[0] = Slab(Vector3f(1.0f, 0.0f, 0.0f), -c[0], -(c + d)[0]);
@@ -72,12 +80,17 @@ bool Box::intersect(const Ray & ray, Intersection & it)
 	else return false;
 
 	it.pos = ray.eval(it.t);
+	it.normal.normalize();
 	it.pS = this;
 	return true;
 }
 
+int Cylinder::id = 0;
 bool Cylinder::intersect(const Ray & ray, Intersection & it)
 {
+	if (ray.x == 293 && ray.y == 72) {
+		printf("Cylinder %d is under checked\n", thisId);
+	}
 	Vector3f Q = q._transformVector(ray.Q - base);
 	Vector3f D = q._transformVector(ray.D);
 	float t0 = 0, t1 = FLT_MAX;
@@ -107,8 +120,9 @@ bool Cylinder::intersect(const Ray & ray, Intersection & it)
 	float c = Q[0] * Q[0] + Q[1] * Q[1] - radius * radius;
 	float deter = b * b - 4.0f * a * c;
 	if (deter < 0) return false;
-	float c0 = (-b - deter) / 2.0f / a;
-	float c1 = (-b + deter) / 2.0f / a;
+	float c0 = (-b - sqrt(deter)) / 2.0f / a;
+	float c1 = (-b + sqrt(deter)) / 2.0f / a;
+
 
 	Vector3f normal0, normal1, M;
 	if (b0 > c0) {
@@ -134,11 +148,15 @@ bool Cylinder::intersect(const Ray & ray, Intersection & it)
 	if (t0 > t1) return false;
 	else if (t0 > 0.0f) {
 		it.t = t0;
-		it.normal = q.conjugate()._transformVector(normal0) * 10.0f;
+		it.normal = q.conjugate()._transformVector(normal0);
 	} else if (t1 > 0.0f) {
 		it.t = t1;
-		it.normal = q.conjugate()._transformVector(normal1) * 10.0f;
+		it.normal = q.conjugate()._transformVector(normal1);
 	} else return false;
+
+	if (ray.x == 293 && ray.y == 72) {
+		printf("Cylinder %d has intersection with t = %.2f\n", thisId, it.t);
+	}
 
 	it.pos = ray.eval(it.t);
 	it.pS = this;
@@ -146,7 +164,31 @@ bool Cylinder::intersect(const Ray & ray, Intersection & it)
 	return true;
 }
 
+#define epsilon 0.000001
 bool Triangle::intersect(const Ray & ray, Intersection & it)
 {
-	return false;
+	Vector3f e1 = v1 - v0;
+	Vector3f e2 = v2 - v0;
+	Vector3f p = ray.D.cross(e2);
+	float d = p.dot(e1);
+	if (abs(d) < epsilon) return false;
+	Vector3f s = ray.Q - v0;
+	float u = (p.dot(s)) / d;
+	if (u < 0.0f || u >1) return false;
+	Vector3f q = s.cross(e1);
+	float v = ray.D.dot(q) / d;
+	if (v < 0.0f || u + v > 1.0f) return false;
+	float t = e2.dot(q) / d;
+	if (t < 0.0f)return false;
+
+	it.t = t;
+	it.pos = ray.eval(t);
+	it.normal = e1.cross(e2);
+	it.normal.normalize();
+	it.pS = this;
+	return true;
+}
+
+Box3d bounding_box(const Shape *pS) {
+	return pS->bbox();
 }
