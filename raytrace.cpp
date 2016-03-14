@@ -304,14 +304,14 @@ void Scene::TraceImage(Color* image, const int pass)
 				Color color;
 				Vector3f rayDir, Weight, expWeight, brdf;
 				Ray ray, shadowRay;
-				float ProbLightSample, ProbBRDFSample, MIS_L, MIS_B;
+				float ProbLightSample, ProbBRDFSample, MIS;
 				Minimizer minimizer, shadowMinimizer;
 				Intersection *pCurrentIt, *pShadowIt, expLight, lastIt;
 
 				// define the ray
 				// transform x and y to [-1,1] screen space
-				float dx = (x + 0.5f) / width * 2 - 1;
-				float dy = (y + 0.5f) / height * 2 - 1;
+				float dx = (x + myrandom(RNGen)) / width * 2 - 1;
+				float dy = (y + myrandom(RNGen)) / height * 2 - 1;
 				rayDir = dx*camX + dy*camY + camZ;
 				rayDir.normalize();
 				ray = Ray(camera->eye, rayDir);
@@ -329,23 +329,8 @@ void Scene::TraceImage(Color* image, const int pass)
 				if (pCurrentIt) {
 					if (!pCurrentIt->pS->mat->isLight()) {
 						while (myrandom(RNGen) < RUSSIAN_ROULETTE) {
-							// Multiple Inportance Sampling---------------------------------------------------------------------
-							// Sample bouncing direction
-							ray.Q = pCurrentIt->pos;
-							ray.D = sampleLope(pCurrentIt->normal, sqrt((float)myrandom(RNGen)), 2.0f * PI * myrandom(RNGen));
-							ProbBRDFSample = pdfBrdf(*pCurrentIt, ray.D) * RUSSIAN_ROULETTE;
-							// Sample light
-							expLight = sampleLight();
-							ProbLightSample = pdfLight(expLight) / geomertryFactor(*pCurrentIt, expLight);
-							// Calculate MIS
-							float TotalDistribution = ProbBRDFSample * ProbBRDFSample + ProbLightSample * ProbLightSample;
-							//MIS_B = ProbBRDFSample * ProbBRDFSample / TotalDistribution;
-							//MIS_L = ProbLightSample * ProbLightSample / TotalDistribution;
-							MIS_B = 1.0f;
-							MIS_L = 1.0f;
-							// -------------------------------------------------------------------------------------------------
-
 							// Explicit Sampling (Light Sampling) --------------------------------------------------------------
+							expLight = sampleLight();
 							rayDir = expLight.pos - pCurrentIt->pos;
 							if (rayDir.dot(pCurrentIt->normal) > 0) {
 								rayDir.normalize();
@@ -353,23 +338,31 @@ void Scene::TraceImage(Color* image, const int pass)
 								shadowMinimizer = Minimizer(shadowRay);
 								pShadowIt = BVMinimize(tree, shadowMinimizer) == FLT_MAX ? NULL : &shadowMinimizer.minIt;
 								if (pShadowIt && (pShadowIt->pos - expLight.pos).squaredNorm() < epsilon) {
+									ProbLightSample = pdfLight(expLight) / geomertryFactor(*pCurrentIt, expLight);
+									ProbBRDFSample = pdfBrdf(*pCurrentIt, shadowRay.D) * RUSSIAN_ROULETTE;
+									MIS = ProbLightSample * ProbLightSample / (ProbLightSample * ProbLightSample + ProbBRDFSample * ProbBRDFSample);
 									brdf = pCurrentIt->normal.dot(shadowRay.D) * evalBrdf(*pCurrentIt);
 									expWeight = Weight.cwiseProduct(brdf / ProbLightSample);
-									color += MIS_L * (Color)(expWeight.cwiseProduct(expLight.pS->mat->color));
+									color += MIS * (Color)(expWeight.cwiseProduct(expLight.pS->mat->color));
 								}
 							}
 							// -------------------------------------------------------------------------------------------------
 
 							// Implicit Sampling (BRDF Sampling) ---------------------------------------------------------------
 							// Save current intersection info and extend path
+							ray.Q = pCurrentIt->pos;
+							ray.D = sampleLope(pCurrentIt->normal, sqrt((float)myrandom(RNGen)), 2.0f * PI * myrandom(RNGen));
 							lastIt = *pCurrentIt;
 							minimizer = Minimizer(ray);
 							if (BVMinimize(tree, minimizer) == FLT_MAX)	break;
 							else {
+								ProbBRDFSample = pdfBrdf(lastIt, ray.D) * RUSSIAN_ROULETTE;
 								brdf = lastIt.normal.dot(ray.D) * evalBrdf(lastIt);
 								Weight = Weight.cwiseProduct(brdf / ProbBRDFSample);
 								if (pCurrentIt->pS->mat->isLight()) {
-									color += MIS_B * (Color)(Weight.cwiseProduct(pCurrentIt->pS->mat->color));
+									ProbLightSample = pdfLight(*pCurrentIt) / geomertryFactor(lastIt, *pCurrentIt);
+									MIS = ProbBRDFSample * ProbBRDFSample / (ProbLightSample * ProbLightSample + ProbBRDFSample * ProbBRDFSample);
+									color += MIS * (Color)(Weight.cwiseProduct(pCurrentIt->pS->mat->color));
 									break;
 								}
 							}
