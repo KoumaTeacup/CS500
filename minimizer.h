@@ -13,6 +13,7 @@ public:
 
 	  // Constructor
 	Minimizer(const Ray& r) : ray(r) { minIt.t = FLT_MAX; }
+	Minimizer(){}
 
 	Scalar minimumOnObject(Shape* obj);
 

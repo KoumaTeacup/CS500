@@ -24,6 +24,10 @@
 #include "material.h"
 #include "camera.h"
 
+#define MAX_PASS 4096
+#define RUSSIAN_ROULETTE 0.8f
+#define epsilon 0.000001
+
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
@@ -32,6 +36,39 @@
 std::mt19937_64 RNGen;
 std::uniform_real_distribution<> myrandom(0.0, 1.0);
 // Call myrandom(RNGen) to get a uniformly distributed random number in [0,1].
+
+// Write the image as a HDR(RGBE) image.  
+#include "rgbe.h"
+void WriteHdrImage(const std::string outName, const int width, const int height, Color* image) {
+	// Turn image from a 2D-bottom-up array of Vector3D to an top-down-array of floats
+	float* data = new float[width*height * 3];
+	float* dp = data;
+	for (int y = height - 1; y >= 0; --y) {
+		for (int x = 0; x<width; ++x) {
+			Color pixel = image[y*width + x];
+			*dp++ = pixel[0];
+			*dp++ = pixel[1];
+			*dp++ = pixel[2];
+		}
+	}
+
+	// Write image to file in HDR (a.k.a RADIANCE) format
+	rgbe_header_info info;
+	char errbuf[100] = { 0 };
+
+	FILE* fp = fopen(outName.c_str(), "wb");
+	info.valid = false;
+	int r = RGBE_WriteHeader(fp, width, height, &info, errbuf);
+	if (r != RGBE_RETURN_SUCCESS)
+		printf("error: %s\n", errbuf);
+
+	r = RGBE_WritePixels_RLE(fp, data, width, height, errbuf);
+	if (r != RGBE_RETURN_SUCCESS)
+		printf("error: %s\n", errbuf);
+	fclose(fp);
+
+	delete data;
+}
 
 Scene::Scene() 
 { 
@@ -73,6 +110,48 @@ Intersection * Scene::traceRay(Ray ray, std::vector<Shape*> shapes)
 	}
 	if (result.t == FLT_MAX) return nullptr;
 	else return new Intersection(result);
+}
+
+Vector3f Scene::sampleLope(Vector3f normal, float cTheta, float Phi) {
+	double sTheta = sqrt(1 - cTheta * cTheta);
+	Vector3f K = Vector3f(sTheta * cosf(Phi), sTheta * sinf(Phi), cTheta);
+	Quaternionf q = Quaternionf::FromTwoVectors(Vector3f::UnitZ(), normal);
+	return q._transformVector(K);
+}
+
+Intersection Scene::sampleLight() {
+	int index = myrandom(RNGen) * emitters.size();
+	return sampleSphere((Sphere*)emitters[index]);
+}
+
+Intersection Scene::sampleSphere(Sphere *s) {
+	if (!s) return Intersection();
+	float z = 2.0f * myrandom(RNGen) - 1;
+	float r = sqrt(1 - z * z);
+	float a = 2.0f * PI * myrandom(RNGen);
+	Intersection it;
+	it.normal = Vector3f(r * cosf(a), r*sinf(a), z);
+	it.pos = s->center + it.normal * s->radius;
+	it.pS = s;
+	return it;
+}
+
+Color Scene::evalBrdf(Intersection &it) {
+	return it.pS->mat->Kd / PI;
+}
+
+float Scene::pdfBrdf(Intersection & it, Vector3f wi) {
+	return it.normal.dot(wi) / PI;
+}
+
+float Scene::pdfLight(Intersection & it) {
+	return 1.0f / emitters.size() / it.pS->area;
+}
+
+float Scene::geomertryFactor(Intersection & A, Intersection & B) {
+	Vector3f D = A.pos - B.pos;
+	float result = A.normal.dot(D) * B.normal.dot(D) / D.dot(D) / D.dot(D);
+	return result > 0 ? result : -result;
 }
 
 const float Radians = PI / 180.0f;    // Convert degrees to radians
@@ -213,47 +292,106 @@ void Scene::TraceImage(Color* image, const int pass)
 	Vector3f camY = camera->ry * camera->orient._transformVector(Vector3f::UnitY());
 	Vector3f camZ = -1 * camera->orient._transformVector(Vector3f::UnitZ());
 
-#pragma omp parallel for schedule(dynamic, 1) // Magic: Multi-thread y loop
-    for (int y=0;  y<height - 1;  ++y) {
-		for (int x = 0; x < width - 1; ++x) {
-        fprintf(stderr, "Rendering y: %4d, x: %4d\r", y, x);
-		// define the ray
-		// transform x and y to [-1,1] screen space
-		float dx = (x + 0.5f) / width * 2 - 1;
-		float dy = (y + 0.5f) / height * 2 - 1;
-		Vector3f rayDir = dx*camX + dy*camY + camZ;
-		rayDir.normalize();
-		Ray ray(camera->eye, rayDir);
+	//fprintf(stderr,	"Rendering Starts.\n¡¾Render Pass¡¿%d\n¡¾Resolution¡¿%d ¡Á %d\n", MAX_PASS, width, height);
+	for (int pass = 0; pass < MAX_PASS; pass++) {
+		#pragma omp parallel for schedule(dynamic, 1) // Magic: Multi-thread y loop
+		for (int y = 0; y < height - 1; ++y) {
+			for (int x = 0; x < width - 1; ++x) {
+				//fprintf(stderr, "Progress: %2d%%, current Pass: %4d\r", pass * 100 / MAX_PASS, pass+1);
+				//fprintf(stderr, "Rendering Pass: %d, y: %4d, x: %4d\r",pass, y, x);
 
-		ray.x = x;
-		ray.y = y;
+				// Variable decleration
+				Color color;
+				Vector3f rayDir, Weight, expWeight, brdf;
+				Ray ray, shadowRay;
+				float ProbLightSample, ProbBRDFSample, MIS_L, MIS_B;
+				Minimizer minimizer, shadowMinimizer;
+				Intersection *pCurrentIt, *pShadowIt, expLight, lastIt;
 
-		// trace the ray
-		Minimizer minimizer(ray);
-		Intersection *intersection = BVMinimize(tree, minimizer) == FLT_MAX ? NULL : &minimizer.minIt;
-		//Intersection *intersection = traceRay(ray, bboxes);
+				// define the ray
+				// transform x and y to [-1,1] screen space
+				float dx = (x + 0.5f) / width * 2 - 1;
+				float dy = (y + 0.5f) / height * 2 - 1;
+				rayDir = dx*camX + dy*camY + camZ;
+				rayDir.normalize();
+				ray = Ray(camera->eye, rayDir);
 
-		// compute the color
-		// Initialized default color to black.
-		Color color = Vector3f(0.0f, 0.0f, 0.0f);
+				// trace the initial ray
+				minimizer = Minimizer(ray);
+				pCurrentIt = BVMinimize(tree, minimizer) == FLT_MAX ? NULL : &minimizer.minIt;
 
-		// Compute brdf if intersection exists and is not a light source
-		if (intersection) {
-			if (!intersection->pS->mat->isLight()) {
-				Vector3f result(0.0f, 0.0f, 0.0f);
-				for (auto e : emitters)
-					// Combine the value from all non-attenuative lights.
-					result += intersection->pS->mat->Kd / PI * intersection->normal.dot((e->position - intersection->pos).normalized());
-				color = result;
-				//color = (intersection->normal + Vector3f(1.0f, 1.0f, 1.0f))/2.0f;
-				//color = intersection->pS->mat->Kd;
+				// compute the color
+				// reset color and weights
+				color = Vector3f(0.0f, 0.0f, 0.0f);
+				Weight = Vector3f(1.0f, 1.0f, 1.0f);
+
+				// Compute brdf if intersection exists and is not a light source
+				if (pCurrentIt) {
+					if (!pCurrentIt->pS->mat->isLight()) {
+						while (myrandom(RNGen) < RUSSIAN_ROULETTE) {
+							// Multiple Inportance Sampling---------------------------------------------------------------------
+							// Sample bouncing direction
+							ray.Q = pCurrentIt->pos;
+							ray.D = sampleLope(pCurrentIt->normal, sqrt((float)myrandom(RNGen)), 2.0f * PI * myrandom(RNGen));
+							ProbBRDFSample = pdfBrdf(*pCurrentIt, ray.D) * RUSSIAN_ROULETTE;
+							// Sample light
+							expLight = sampleLight();
+							ProbLightSample = pdfLight(expLight) / geomertryFactor(*pCurrentIt, expLight);
+							// Calculate MIS
+							float TotalDistribution = ProbBRDFSample * ProbBRDFSample + ProbLightSample * ProbLightSample;
+							//MIS_B = ProbBRDFSample * ProbBRDFSample / TotalDistribution;
+							//MIS_L = ProbLightSample * ProbLightSample / TotalDistribution;
+							MIS_B = 1.0f;
+							MIS_L = 1.0f;
+							// -------------------------------------------------------------------------------------------------
+
+							// Explicit Sampling (Light Sampling) --------------------------------------------------------------
+							rayDir = expLight.pos - pCurrentIt->pos;
+							if (rayDir.dot(pCurrentIt->normal) > 0) {
+								rayDir.normalize();
+								shadowRay = Ray(pCurrentIt->pos, rayDir);
+								shadowMinimizer = Minimizer(shadowRay);
+								pShadowIt = BVMinimize(tree, shadowMinimizer) == FLT_MAX ? NULL : &shadowMinimizer.minIt;
+								if (pShadowIt && (pShadowIt->pos - expLight.pos).squaredNorm() < epsilon) {
+									brdf = pCurrentIt->normal.dot(shadowRay.D) * evalBrdf(*pCurrentIt);
+									expWeight = Weight.cwiseProduct(brdf / ProbLightSample);
+									color += MIS_L * (Color)(expWeight.cwiseProduct(expLight.pS->mat->color));
+								}
+							}
+							// -------------------------------------------------------------------------------------------------
+
+							// Implicit Sampling (BRDF Sampling) ---------------------------------------------------------------
+							// Save current intersection info and extend path
+							lastIt = *pCurrentIt;
+							minimizer = Minimizer(ray);
+							if (BVMinimize(tree, minimizer) == FLT_MAX)	break;
+							else {
+								brdf = lastIt.normal.dot(ray.D) * evalBrdf(lastIt);
+								Weight = Weight.cwiseProduct(brdf / ProbBRDFSample);
+								if (pCurrentIt->pS->mat->isLight()) {
+									color += MIS_B * (Color)(Weight.cwiseProduct(pCurrentIt->pS->mat->color));
+									break;
+								}
+							}
+							// -------------------------------------------------------------------------------------------------
+						}
+					}
+					// Use pure color for light sources
+					else color = pCurrentIt->pS->mat->color;
+				}
+
+				image[y*width + x] += color/(float)MAX_PASS;
 			}
-			// Use pure color for light sources
-			else color = intersection->pS->mat->color;
 		}
+		//fprintf(stderr, "\n");
 
-		image[y*width + x] = color;
+		// Out HDR Image whenever Pass is 2 exponential.
+		if (pass == 0 || pass == 3 || pass == 15 || pass == 63 || pass == 255 || pass == 1023 || pass == 4095){
+			char filename[32];
+			sprintf(filename, "Image_Pass_%d.hdr", pass + 1);
+			std::string hdrName = filename;
+			// Write the image
+			WriteHdrImage(hdrName, width, height, image);
 		}
 	}
-    fprintf(stderr, "\n");
 }

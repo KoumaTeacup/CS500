@@ -13,9 +13,6 @@ float Minimizer::minimumOnObject(Shape * obj) {
 float Minimizer::minimumOnVolume(const Box3d & box) {
 	Vector3f L = box.corner(Box3d::BottomLeftFloor);
 	Vector3f U = box.corner(Box3d::TopRightCeil);
-	if (ray.x == 293 && ray.y == 72) {
-		printf("box (%.2f, %.2f, %.2f - %.2f, %.2f, %.2f) is under checked\n", L[0], L[1], L[2], U[0], U[1], U[2]);
-	}
 	Slab slabs[3];
 	slabs[0] = Slab(Vector3f(1.0f, 0.0f, 0.0f), -L[0], -U[0]);
 	slabs[1] = Slab(Vector3f(0.0f, 1.0f, 0.0f), -L[1], -U[1]);
@@ -49,17 +46,7 @@ float Minimizer::minimumOnVolume(const Box3d & box) {
 	}
 
 	if (t0 > t1) return FLT_MAX;
-	else if (t0 > 0.0f) {
-		if (ray.x == 293 && ray.y == 72) {
-			printf("has intersection t = %.2f\n", t0);
-		}
-		return t0;
-	}
-	else if (t1 > 0.0f) {
-		if (ray.x == 293 && ray.y == 72) {
-			printf("has intersection t = %.2f\n", t1);
-		}
-		return t1;
-	}
+	else if (t0 > 0.0f) return t0;
+	else if (t1 > 0.0f) return 0.0f;
 	else return FLT_MAX;
 }

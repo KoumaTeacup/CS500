@@ -17,8 +17,8 @@ struct Slab
 
 class Ray {
 public:
-	int x, y;
 	Ray(Vector3f q, Vector3f d) :Q(q), D(d) {}
+	Ray(){}
 
 	Vector3f eval(float t)const { return Q + t * D; }
 	Vector3f Q, D;
@@ -33,7 +33,7 @@ struct Intersection {
 class Shape {
 public:
 	Vector3f position;
-	Shape(Material *m):mat(m) {}
+	Shape(Material *m):mat(m), area(0.0f) {}
 	virtual ~Shape() {}
 
 	virtual bool intersect(const Ray& ray, Intersection& it) = 0;
@@ -41,6 +41,7 @@ public:
 	virtual Box3d bbox() const { return Box3d(); }
 
 	Material *mat;
+	float area;
 };
 
 Box3d bounding_box(const Shape *pS);
@@ -51,7 +52,7 @@ public:
 
 	Vector3f center;
 	float radius;
-	Sphere(Vector3f _center, float _radius, Material *m) : Shape(m), center(_center), radius(_radius),thisId(id++) { position = _center; }
+	Sphere(Vector3f _center, float _radius, Material *m) : Shape(m), center(_center), radius(_radius), thisId(id++) { position = _center; Shape::area = 4 * 3.141592653f * radius * radius; }
 	bool intersect(const Ray& ray, Intersection& it);
 
 	virtual Box3d bbox()const {

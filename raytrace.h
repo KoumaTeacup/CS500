@@ -73,6 +73,14 @@ public:
 
 	Intersection *traceRay(Ray ray, std::vector<Shape*> shapes);
 
+	Vector3f sampleLope(Vector3f normal, float cTheta, float Phi);
+	Intersection sampleLight();
+	Intersection sampleSphere(Sphere *s);
+	Color evalBrdf(Intersection &it);
+	float pdfBrdf(Intersection &it, Vector3f wi);
+	float pdfLight(Intersection &it);
+	float geomertryFactor(Intersection &A, Intersection &B);
+
     // The main program will call the TraceImage method to generate
     // and return the image.  This is the Ray Tracer!
     void TraceImage(Color* image, const int pass);

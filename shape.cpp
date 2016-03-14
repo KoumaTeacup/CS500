@@ -2,9 +2,6 @@
 
 bool Sphere::intersect(const Ray & ray, Intersection & it)
 {
-	if (ray.x == 293 && ray.y == 72) {
-		printf("Sphere %d is under checked\n", thisId);
-	}
 	Vector3f Qbar = ray.Q - center;
 	float QdotD = Qbar.dot(ray.D);
 	float fvar = sqrt(QdotD*QdotD - Qbar.dot(Qbar) + radius*radius);
@@ -16,9 +13,6 @@ bool Sphere::intersect(const Ray & ray, Intersection & it)
 	it.normal = (it.pos - center).normalized();
 	it.pS = this;
 
-	if (ray.x == 293 && ray.y == 72) {
-		printf("Sphere %d has intersection with t = %.2f\n", thisId, it.t);
-	}
 	return true;
 }
 
@@ -88,9 +82,6 @@ bool Box::intersect(const Ray & ray, Intersection & it)
 int Cylinder::id = 0;
 bool Cylinder::intersect(const Ray & ray, Intersection & it)
 {
-	if (ray.x == 293 && ray.y == 72) {
-		printf("Cylinder %d is under checked\n", thisId);
-	}
 	Vector3f Q = q._transformVector(ray.Q - base);
 	Vector3f D = q._transformVector(ray.D);
 	float t0 = 0, t1 = FLT_MAX;
@@ -153,10 +144,6 @@ bool Cylinder::intersect(const Ray & ray, Intersection & it)
 		it.t = t1;
 		it.normal = q.conjugate()._transformVector(normal1);
 	} else return false;
-
-	if (ray.x == 293 && ray.y == 72) {
-		printf("Cylinder %d has intersection with t = %.2f\n", thisId, it.t);
-	}
 
 	it.pos = ray.eval(it.t);
 	it.pS = this;
