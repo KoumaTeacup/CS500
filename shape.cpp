@@ -1,12 +1,14 @@
 #include "shape.h"
 
+#define epsilon 0.00001
+
 bool Sphere::intersect(const Ray & ray, Intersection & it)
 {
 	Vector3f Qbar = ray.Q - center;
 	float QdotD = Qbar.dot(ray.D);
 	float fvar = sqrt(QdotD*QdotD - Qbar.dot(Qbar) + radius*radius);
-	if (-QdotD - fvar > 0.0f) it.t = -QdotD - fvar;
-	else if (-QdotD + fvar > 0.0f) it.t = -QdotD + fvar;
+	if (-QdotD - fvar > epsilon) it.t = -QdotD - fvar;
+	else if (-QdotD + fvar > epsilon) it.t = -QdotD + fvar;
 	else return false;
 
 	it.pos = ray.eval(it.t);
@@ -63,11 +65,11 @@ bool Box::intersect(const Ray & ray, Intersection & it)
 	}
 
 	if (t0 > t1) return false;
-	else if (t0 > 0.0f) {
+	else if (t0 > epsilon) {
 		it.t = t0; 
 		it.normal = normal0;
 	}
-	else if (t1 > 0.0f) {
+	else if (t1 > epsilon) {
 		it.t = t1;
 		it.normal = normal1;
 	}
@@ -75,6 +77,10 @@ bool Box::intersect(const Ray & ray, Intersection & it)
 
 	it.pos = ray.eval(it.t);
 	it.normal.normalize();
+	Vector3f cornerToIt = it.pos - corner;
+	if (cornerToIt[0] < epsilon || cornerToIt[1] < epsilon || cornerToIt[2] < epsilon) {
+		if (it.normal.dot(diag) > 0.0f) it.normal *= -1;
+	} else if (it.normal.dot(diag) < 0.0f) it.normal *= -1;
 	it.pS = this;
 	return true;
 }
@@ -118,7 +124,7 @@ bool Cylinder::intersect(const Ray & ray, Intersection & it)
 	Vector3f normal0, normal1, M;
 	if (b0 > c0) {
 		t0 = b0;
-		if (D[2] > 0.0f) normal0 = Vector3f(0.0f, 0.0f, -1.0f);
+		if (D[2] > epsilon) normal0 = Vector3f(0.0f, 0.0f, -1.0f);
 		else normal0 = Vector3f(0.0f, 0.0f, 1.0f);
 	} else {
 		t0 = c0;
@@ -128,7 +134,7 @@ bool Cylinder::intersect(const Ray & ray, Intersection & it)
 
 	if (b1 < c1) {
 		t1 = b1;
-		if (D[2] > 0.0f) normal1 = Vector3f(0.0f, 0.0f, 1.0f);
+		if (D[2] > epsilon) normal1 = Vector3f(0.0f, 0.0f, 1.0f);
 		else normal1 = Vector3f(0.0f, 0.0f, -1.0f);
 	} else {
 		t1 = c1;
@@ -137,10 +143,10 @@ bool Cylinder::intersect(const Ray & ray, Intersection & it)
 	}
 
 	if (t0 > t1) return false;
-	else if (t0 > 0.0f) {
+	else if (t0 > epsilon) {
 		it.t = t0;
 		it.normal = q.conjugate()._transformVector(normal0);
-	} else if (t1 > 0.0f) {
+	} else if (t1 > epsilon) {
 		it.t = t1;
 		it.normal = q.conjugate()._transformVector(normal1);
 	} else return false;
