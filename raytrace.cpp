@@ -24,7 +24,7 @@
 #include "material.h"
 #include "camera.h"
 
-#define MAX_PASS 256
+#define MAX_PASS 4096
 #define RUSSIAN_ROULETTE 0.8f
 #define epsilon 0.000001
 
@@ -136,8 +136,8 @@ Intersection Scene::sampleSphere(Sphere *s) {
 	return it;
 }
 
-Vector3f Scene::sampleBrdf(Intersection & it, Vector3f &wo) {
-	bool isDiffuse = myrandom(RNGen) < ProbDiffuse;
+Vector3f Scene::sampleBrdf(Intersection & it, Vector3f &wo, float probDiff) {
+	bool isDiffuse = myrandom(RNGen) < probDiff;
 	if (isDiffuse)
 		return sampleLope(it.normal, sqrt(myrandom(RNGen)), 2.0f * PI * myrandom(RNGen));
 	else {
@@ -146,23 +146,18 @@ Vector3f Scene::sampleBrdf(Intersection & it, Vector3f &wo) {
 	}
 }
 
-Color Scene::evalBrdf(Intersection &it, Vector3f &wi, Vector3f &wo) {
+Color Scene::evalBrdf(Intersection &it, Vector3f &wi, Vector3f &wo, float probDiff, float probSpec) {
 	Color Ed = it.pS->mat->Kd / PI;
 	Vector3f m = (wo + wi).normalized();
 	Color Er = DistributionPhong(it, m) * GPhong(it, wi, wo, m) * Fresnel(it, wi.dot(m)) / 4.0f / wi.dot(it.normal) / wo.dot(it.normal);
-	//return ProbDiffuse * Ed + ProbSpecular * Er;
-	Color result = ProbDiffuse * Ed + ProbSpecular * Er;
-	if (result[0] < 0 || result[1] < 0 || result[2] < 0) {
-		printf("color less than 0");
-	}
-	return result;
+	return probDiff * Ed + probSpec * Er;
 }
 
-float Scene::pdfBrdf(Intersection & it, Vector3f &wi, Vector3f &wo) {
+float Scene::pdfBrdf(Intersection & it, Vector3f &wi, Vector3f &wo, float probDiff, float probSpec) {
 	float pd = fabs(wi.dot(it.normal)) / PI;
 	Vector3f m = (wo + wi).normalized();
 	float pr = DistributionPhong(it, m) * fabs(m.dot(it.normal)) / 4.0f / wi.dot(m);
-	return pd * ProbDiffuse + pr * ProbSpecular;
+	return pd * probDiff + pr * probSpec;
 }
 
 float Scene::pdfLight(Intersection & it) {
@@ -189,9 +184,11 @@ Vector3f Scene::Fresnel(Intersection &it, float d) {
 
 float Scene::G1(Intersection &it, Vector3f & w, Vector3f m) {
 	float vDotN = w.dot(it.normal);
+	if (vDotN > 1.0f) return 1.0f;
 	if (w.dot(m) / vDotN < 0) return 0.0f;
 	else {
 		float tanTheta = sqrt(1.0f - vDotN * vDotN) / vDotN;
+		if (tanTheta < epsilon) return 1.0f;
 		float a = sqrt(it.pS->mat->alpha / 2.0f + 1.0f) / tanTheta;
 		if (a > 1.6) return 1.0f;
 		else return (3.535f * a + 2.181f * a * a) / (1.0f + 2.276f * a + 2.577 * a *a);
@@ -338,9 +335,9 @@ void Scene::TraceImage(Color* image, const int pass)
 
 	//fprintf(stderr,	"Rendering Starts.\n¡¾Render Pass¡¿%d\n¡¾Resolution¡¿%d ¡Á %d\n", MAX_PASS, width, height);
 	for (int pass = 0; pass < MAX_PASS; pass++) {
-		//#pragma omp parallel for schedule(dynamic, 1) // Magic: Multi-thread y loop
-		for (int y = 40; y < height - 1; ++y) {
-			for (int x = 295; x < width - 1; ++x) {
+		#pragma omp parallel for schedule(dynamic, 1) // Magic: Multi-thread y loop
+		for (int y = 0; y < height - 1; ++y) {
+			for (int x = 0; x < width - 1; ++x) {
 				//fprintf(stderr, "Progress: %2d%%, current Pass: %4d\r", pass * 100 / MAX_PASS, pass+1);
 				//fprintf(stderr, "Rendering Pass: %d, y: %4d, x: %4d\r",pass, y, x);
 
@@ -351,6 +348,8 @@ void Scene::TraceImage(Color* image, const int pass)
 				float ProbLightSample, ProbBRDFSample, MIS;
 				Minimizer minimizer, shadowMinimizer;
 				Intersection *pCurrentIt, *pShadowIt, expLight, lastIt;
+				float ProbDiffuse;
+				float ProbSpecular;
 
 				// define the ray
 				// transform x and y to [-1,1] screen space
@@ -390,9 +389,9 @@ void Scene::TraceImage(Color* image, const int pass)
 								//if (pShadowIt && (pShadowIt->pos - expLight.pos).squaredNorm() < epsilon) {
 								if (pShadowIt && pShadowIt->pS == expLight.pS) {
 									ProbLightSample = pdfLight(expLight) / geomertryFactor(*pCurrentIt, expLight);
-									ProbBRDFSample = pdfBrdf(*pCurrentIt, shadowRay.D, wo) * RUSSIAN_ROULETTE;
+									ProbBRDFSample = pdfBrdf(*pCurrentIt, shadowRay.D, wo, ProbDiffuse, ProbSpecular) * RUSSIAN_ROULETTE;
 									MIS = ProbLightSample * ProbLightSample / (ProbLightSample * ProbLightSample + ProbBRDFSample * ProbBRDFSample);
-									brdf = pCurrentIt->normal.dot(shadowRay.D) * evalBrdf(*pCurrentIt, shadowRay.D, wo);
+									brdf = pCurrentIt->normal.dot(shadowRay.D) * evalBrdf(*pCurrentIt, shadowRay.D, wo, ProbDiffuse, ProbSpecular);
 									expWeight = Weight.cwiseProduct(brdf / ProbLightSample);
 									color += MIS * (Color)(expWeight.cwiseProduct(expLight.pS->mat->color));
 								}
@@ -403,25 +402,19 @@ void Scene::TraceImage(Color* image, const int pass)
 							// Save current intersection info and extend path
 							ray.Q = pCurrentIt->pos;
 							//do { ray.D = sampleBrdf(*pCurrentIt, wo); } while (pCurrentIt->normal.dot(ray.D) < epsilon);
-							ray.D = sampleBrdf(*pCurrentIt, wo);
+							ray.D = sampleBrdf(*pCurrentIt, wo, ProbDiffuse);
 							if (pCurrentIt->normal.dot(ray.D) < epsilon) break;
 							lastIt = *pCurrentIt;
 							minimizer = Minimizer(ray);
 							if (BVMinimize(tree, minimizer) == FLT_MAX)	break;
 							else {
-								if ((ProbBRDFSample = pdfBrdf(lastIt, ray.D, wo) * RUSSIAN_ROULETTE) < epsilon) break;								
-								brdf = lastIt.normal.dot(ray.D) * evalBrdf(lastIt,ray.D, wo);
+								if ((ProbBRDFSample = pdfBrdf(lastIt, ray.D, wo, ProbDiffuse, ProbSpecular) * RUSSIAN_ROULETTE) < epsilon) break;								
+								brdf = lastIt.normal.dot(ray.D) * evalBrdf(lastIt,ray.D, wo, ProbDiffuse, ProbSpecular);
 								Weight = Weight.cwiseProduct(brdf / ProbBRDFSample);
-								if (Weight[0] < 0 || Weight[1] < 0 || Weight[2] < 0) {
-									printf("Weight less than 0\n");
-								}
 								if (pCurrentIt->pS->mat->isLight()) {
 									ProbLightSample = pdfLight(*pCurrentIt) / geomertryFactor(lastIt, *pCurrentIt);
 									MIS = ProbBRDFSample * ProbBRDFSample / (ProbLightSample * ProbLightSample + ProbBRDFSample * ProbBRDFSample);
-									color += MIS * (Color)(Weight.cwiseProduct(pCurrentIt->pS->mat->color));/*
-									if (color[0] < 0 || color[1] < 0 || color[2] < 0) {
-										printf("color less than 0");
-									}*/
+									color += MIS * (Color)(Weight.cwiseProduct(pCurrentIt->pS->mat->color));
 									break;
 								}
 							}

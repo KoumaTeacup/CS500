@@ -76,9 +76,9 @@ public:
 	Vector3f sampleLope(Vector3f normal, float cTheta, float Phi);
 	Intersection sampleLight();
 	Intersection sampleSphere(Sphere *s);
-	Vector3f sampleBrdf(Intersection &it, Vector3f &wo);
-	Color evalBrdf(Intersection &it, Vector3f &wi, Vector3f &wo);
-	float pdfBrdf(Intersection &it, Vector3f &wi, Vector3f &wo);
+	Vector3f sampleBrdf(Intersection &it, Vector3f &wo, float probDiff);
+	Color evalBrdf(Intersection &it, Vector3f &wi, Vector3f &wo, float probDiff, float probSpec);
+	float pdfBrdf(Intersection &it, Vector3f &wi, Vector3f &wo, float probDiff, float probSpec);
 	float pdfLight(Intersection &it);
 	float geomertryFactor(Intersection &A, Intersection &B);
 
@@ -89,7 +89,4 @@ public:
     // The main program will call the TraceImage method to generate
     // and return the image.  This is the Ray Tracer!
     void TraceImage(Color* image, const int pass);
-
-	float ProbDiffuse;
-	float ProbSpecular;
 };

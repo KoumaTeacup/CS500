@@ -1,6 +1,6 @@
 #include "shape.h"
 
-#define epsilon 0.00001
+#define epsilon 0.0001
 
 bool Sphere::intersect(const Ray & ray, Intersection & it)
 {
@@ -91,15 +91,15 @@ bool Cylinder::intersect(const Ray & ray, Intersection & it)
 	Vector3f Q = q._transformVector(ray.Q - base);
 	Vector3f D = q._transformVector(ray.D);
 	float t0 = 0, t1 = FLT_MAX;
-	float b0, b1;
+	double b0, b1;
 	Vector3f normalVec;
 	if (slab.normal.dot(D)) {
-		float NdotQ = slab.normal.dot(Q);
-		float NdotD = slab.normal.dot(D);
+		double NdotQ = slab.normal.dot(Q);
+		double NdotD = slab.normal.dot(D);
 		b0 = -(slab.d0 + NdotQ) / NdotD;
 		b1 = -(slab.d1 + NdotQ) / NdotD;
 		if (b0 > b1) {
-			float temp = b0;
+			double temp = b0;
 			b0 = b1;
 			b1 = temp;
 		}
@@ -112,13 +112,13 @@ bool Cylinder::intersect(const Ray & ray, Intersection & it)
 			b1 = FLT_MAX;
 		} else return false;
 	}
-	float a = D[0] * D[0] + D[1] * D[1];
-	float b = 2 * (D[0] * Q[0] + D[1] * Q[1]);
-	float c = Q[0] * Q[0] + Q[1] * Q[1] - radius * radius;
-	float deter = b * b - 4.0f * a * c;
+	double a = D[0] * D[0] + D[1] * D[1];
+	double b = 2 * (D[0] * Q[0] + D[1] * Q[1]);
+	double c = Q[0] * Q[0] + Q[1] * Q[1] - radius * radius;
+	double deter = b * b - 4.0f * a * c;
 	if (deter < 0) return false;
-	float c0 = (-b - sqrt(deter)) / 2.0f / a;
-	float c1 = (-b + sqrt(deter)) / 2.0f / a;
+	double c0 = (-b - sqrt(deter)) / 2.0f / a;
+	double c1 = (-b + sqrt(deter)) / 2.0f / a;
 
 
 	Vector3f normal0, normal1, M;
