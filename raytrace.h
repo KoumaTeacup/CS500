@@ -76,9 +76,9 @@ public:
 	Vector3f sampleLope(Vector3f normal, float cTheta, float Phi);
 	Intersection sampleLight();
 	Intersection sampleSphere(Sphere *s);
-	Vector3f sampleBrdf(Intersection &it, Vector3f &wo, float probDiff);
-	Color evalBrdf(Intersection &it, Vector3f &wi, Vector3f &wo, float probDiff, float probSpec);
-	float pdfBrdf(Intersection &it, Vector3f &wi, Vector3f &wo, float probDiff, float probSpec);
+	Vector3f sampleBrdf(Intersection &it, Vector3f &wo, float probDiff, float probSpec);
+	Color evalBrdf(Intersection &it, Vector3f &wi, Vector3f &wo, float probDiff, float probSpec, float probTrans, float wiT);
+	float pdfBrdf(Intersection &it, Vector3f &wi, Vector3f &wo, float probDiff, float probSpec, float probTrans);
 	float pdfLight(Intersection &it);
 	float geomertryFactor(Intersection &A, Intersection &B);
 

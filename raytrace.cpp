@@ -136,28 +136,86 @@ Intersection Scene::sampleSphere(Sphere *s) {
 	return it;
 }
 
-Vector3f Scene::sampleBrdf(Intersection & it, Vector3f &wo, float probDiff) {
-	bool isDiffuse = myrandom(RNGen) < probDiff;
-	if (isDiffuse)
+Vector3f Scene::sampleBrdf(Intersection & it, Vector3f &wo, float probDiff, float probSpec) {
+	float ran = myrandom(RNGen);
+	if (ran < probDiff)
 		return sampleLope(it.normal, sqrt(myrandom(RNGen)), 2.0f * PI * myrandom(RNGen));
-	else {
+	else if (ran < probDiff + probSpec) {
 		Vector3f m = sampleLope(it.normal, pow(myrandom(RNGen), 1.0f / (it.pS->mat->alpha + 1.0f)), 2.0f * PI * myrandom(RNGen));
 		return 2.0f * wo.dot(m) * m - wo;
 	}
+	else {
+		Vector3f m = sampleLope(it.normal, pow(myrandom(RNGen), 1.0f / (it.pS->mat->alpha + 1.0f)), 2.0f * PI * myrandom(RNGen));
+		float eta = it.pS->mat->ior;
+		if (wo.dot(it.normal) > 0) eta = 1.0f / eta;
+		float woDotM = wo.dot(m);
+		float r = 1.0f - eta*eta*(1 - woDotM * woDotM);
+		if (r < 0) return 2.0f * woDotM * m - wo;
+		else return (eta * woDotM - (wo.dot(it.normal) > 0.0f ? 1.0f : -1.0f) * sqrt(r)) * m - eta* wo;
+	}
 }
 
-Color Scene::evalBrdf(Intersection &it, Vector3f &wi, Vector3f &wo, float probDiff, float probSpec) {
+Color Scene::evalBrdf(Intersection &it, Vector3f &wi, Vector3f &wo, float probDiff, float probSpec, float probTrans, float wiT) {
+	float jacobDen = fabs(wi.dot(it.normal) * wo.dot(it.normal));
+
+	// Diffuse
 	Color Ed = it.pS->mat->Kd / PI;
+
+	// Reflection
 	Vector3f m = (wo + wi).normalized();
-	Color Er = DistributionPhong(it, m) * GPhong(it, wi, wo, m) * Fresnel(it, wi.dot(m)) / 4.0f / wi.dot(it.normal) / wo.dot(it.normal);
-	return probDiff * Ed + probSpec * Er;
+	Color Er = DistributionPhong(it, m) * GPhong(it, wi, wo, m) * Fresnel(it, wi.dot(m)) / 4.0f / jacobDen;
+
+	// Transmission
+	float etai = it.pS->mat->ior;
+	float etao = 1.0f;
+	if (wo.dot(it.normal) > 0) {
+		etao = etai; etai = 1.0f;
+	}
+	float eta = etai / etao;
+	m = -(etao*wi + etai * wo).normalized();
+	float woDotM = wo.dot(m);
+	float r = 1.0f - eta*eta*(1 - woDotM * woDotM);
+	Color Et;
+	if (r < 0.0f) Et = Er;
+	else {
+		float den = etao * wi.dot(m) + etai * wo.dot(m);
+		float result = DistributionPhong(it, m)
+			* GPhong(it, wi, wo, m)
+			/ jacobDen
+			* fabs(wi.dot(m) * wo.dot(m)) * etao * etao
+			/ den / den;
+		Et = result * (Vector3f(1.0f, 1.0f, 1.0f) - Fresnel(it, wi.dot(m)));
+	}
+	Color attenuation = Color(1.0f, 1.0f, 1.0f);
+	if (wi.dot(it.normal) < 0.0f) {
+		Vector3f Kt = it.pS->mat->Kt;
+		for (int i = 0; i < 3; ++i) attenuation[i] = pow(Kt[i], wiT);
+	}
+	return probDiff * Ed + probSpec * Er + probTrans * Et.cwiseProduct(attenuation);
 }
 
-float Scene::pdfBrdf(Intersection & it, Vector3f &wi, Vector3f &wo, float probDiff, float probSpec) {
+float Scene::pdfBrdf(Intersection & it, Vector3f &wi, Vector3f &wo, float probDiff, float probSpec, float probTrans) {
 	float pd = fabs(wi.dot(it.normal)) / PI;
+
 	Vector3f m = (wo + wi).normalized();
-	float pr = DistributionPhong(it, m) * fabs(m.dot(it.normal)) / 4.0f / wi.dot(m);
-	return pd * probDiff + pr * probSpec;
+	float pr = DistributionPhong(it, m) * fabs(m.dot(it.normal)) / 4.0f / fabs(wi.dot(m));
+
+	float etai = it.pS->mat->ior;
+	float etao = 1.0f;
+	if (wo.dot(it.normal) > 0) {
+		etao = etai; etai = 1.0f;
+	}
+	float eta = etai / etao;	
+	m = -(etao*wi + etai * wo).normalized();
+	float woDotM = wo.dot(m);
+	float r = 1.0f - eta*eta*(1 - woDotM * woDotM);
+	float pt;
+	if (r < 0) pt = pr;
+	else {
+		float den = etao * wi.dot(m) + etai * wo.dot(m);
+		pt = DistributionPhong(it, m) * fabs(m.dot(it.normal)) * etao*etao*fabs(wi.dot(m)) / den / den;
+	}
+	return pd * probDiff + pr * probSpec + pt * probTrans;
 }
 
 float Scene::pdfLight(Intersection & it) {
@@ -263,7 +321,7 @@ void Scene::Command(const std::vector<std::string>& strings,
         // First rgb is Diffuse reflection, second is specular reflection.
         // third is beer's law transmission followed by index of refraction.
         // Creates a Material instance to be picked up by successive shapes
-        currentMat = new BRDF(Vector3f(f[1], f[2], f[3]), Vector3f(f[4], f[5], f[6]), f[7]); 
+        currentMat = new BRDF(Vector3f(f[1], f[2], f[3]), Vector3f(f[4], f[5], f[6]), f[7], Vector3f(f[8], f[9], f[10]), f[11]); 
 	}
 
     else if (c == "light") {
@@ -350,6 +408,7 @@ void Scene::TraceImage(Color* image, const int pass)
 				Intersection *pCurrentIt, *pShadowIt, expLight, lastIt;
 				float ProbDiffuse;
 				float ProbSpecular;
+				float ProbTransmission;
 
 				// define the ray
 				// transform x and y to [-1,1] screen space
@@ -375,26 +434,26 @@ void Scene::TraceImage(Color* image, const int pass)
 							Vector3f wo = -ray.D;
 							float KdNorm = pCurrentIt->pS->mat->Kd.norm();
 							float KsNorm = pCurrentIt->pS->mat->Ks.norm();
-							ProbDiffuse = KdNorm / (KdNorm + KsNorm);
-							ProbSpecular = KsNorm / (KdNorm + KsNorm);
+							float KtNorm = pCurrentIt->pS->mat->Kt.norm();
+							ProbDiffuse = KdNorm / (KdNorm + KsNorm + KtNorm);
+							ProbSpecular = KsNorm / (KdNorm + KsNorm + KtNorm);
+							ProbTransmission = KtNorm / (KdNorm + KsNorm + KtNorm); 
 
 							// Explicit Sampling (Light Sampling) --------------------------------------------------------------
 							expLight = sampleLight();
 							rayDir = expLight.pos - pCurrentIt->pos;
-							if (rayDir.dot(pCurrentIt->normal) > epsilon) {
-								rayDir.normalize();
-								shadowRay = Ray(pCurrentIt->pos, rayDir);
-								shadowMinimizer = Minimizer(shadowRay);
-								pShadowIt = BVMinimize(tree, shadowMinimizer) == FLT_MAX ? NULL : &shadowMinimizer.minIt;
-								//if (pShadowIt && (pShadowIt->pos - expLight.pos).squaredNorm() < epsilon) {
-								if (pShadowIt && pShadowIt->pS == expLight.pS) {
-									ProbLightSample = pdfLight(expLight) / geomertryFactor(*pCurrentIt, expLight);
-									ProbBRDFSample = pdfBrdf(*pCurrentIt, shadowRay.D, wo, ProbDiffuse, ProbSpecular) * RUSSIAN_ROULETTE;
-									MIS = ProbLightSample * ProbLightSample / (ProbLightSample * ProbLightSample + ProbBRDFSample * ProbBRDFSample);
-									brdf = pCurrentIt->normal.dot(shadowRay.D) * evalBrdf(*pCurrentIt, shadowRay.D, wo, ProbDiffuse, ProbSpecular);
-									expWeight = Weight.cwiseProduct(brdf / ProbLightSample);
-									color += MIS * (Color)(expWeight.cwiseProduct(expLight.pS->mat->color));
-								}
+							rayDir.normalize();
+							shadowRay = Ray(pCurrentIt->pos, rayDir);
+							shadowMinimizer = Minimizer(shadowRay);
+							pShadowIt = BVMinimize(tree, shadowMinimizer) == FLT_MAX ? NULL : &shadowMinimizer.minIt;
+							//if (pShadowIt && (pShadowIt->pos - expLight.pos).squaredNorm() < epsilon) {
+							if (pShadowIt && pShadowIt->pS == expLight.pS) {
+								ProbLightSample = pdfLight(expLight) / geomertryFactor(*pCurrentIt, expLight);
+								ProbBRDFSample = pdfBrdf(*pCurrentIt, shadowRay.D, wo, ProbDiffuse, ProbSpecular, ProbTransmission) * RUSSIAN_ROULETTE;
+								MIS = ProbLightSample * ProbLightSample / (ProbLightSample * ProbLightSample + ProbBRDFSample * ProbBRDFSample);
+								brdf = fabs(pCurrentIt->normal.dot(shadowRay.D)) * evalBrdf(*pCurrentIt, shadowRay.D, wo, ProbDiffuse, ProbSpecular, ProbTransmission, pShadowIt->t);
+								expWeight = Weight.cwiseProduct(brdf / ProbLightSample);
+								color += MIS * (Color)(expWeight.cwiseProduct(expLight.pS->mat->color));
 							}
 							// -------------------------------------------------------------------------------------------------
 
@@ -402,14 +461,14 @@ void Scene::TraceImage(Color* image, const int pass)
 							// Save current intersection info and extend path
 							ray.Q = pCurrentIt->pos;
 							//do { ray.D = sampleBrdf(*pCurrentIt, wo); } while (pCurrentIt->normal.dot(ray.D) < epsilon);
-							ray.D = sampleBrdf(*pCurrentIt, wo, ProbDiffuse);
-							if (pCurrentIt->normal.dot(ray.D) < epsilon) break;
+							ray.D = sampleBrdf(*pCurrentIt, wo, ProbDiffuse, ProbSpecular);
+							//if (pCurrentIt->normal.dot(ray.D) < epsilon) break;
 							lastIt = *pCurrentIt;
 							minimizer = Minimizer(ray);
 							if (BVMinimize(tree, minimizer) == FLT_MAX)	break;
 							else {
-								if ((ProbBRDFSample = pdfBrdf(lastIt, ray.D, wo, ProbDiffuse, ProbSpecular) * RUSSIAN_ROULETTE) < epsilon) break;								
-								brdf = lastIt.normal.dot(ray.D) * evalBrdf(lastIt,ray.D, wo, ProbDiffuse, ProbSpecular);
+								if ((ProbBRDFSample = pdfBrdf(lastIt, ray.D, wo, ProbDiffuse, ProbSpecular, ProbTransmission) * RUSSIAN_ROULETTE) < epsilon) break;								
+								brdf = fabs(lastIt.normal.dot(ray.D)) * evalBrdf(lastIt,ray.D, wo, ProbDiffuse, ProbSpecular, ProbTransmission, pCurrentIt->t);
 								Weight = Weight.cwiseProduct(brdf / ProbBRDFSample);
 								if (pCurrentIt->pS->mat->isLight()) {
 									ProbLightSample = pdfLight(*pCurrentIt) / geomertryFactor(lastIt, *pCurrentIt);
